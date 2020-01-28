@@ -144,7 +144,10 @@ var _ = Describe("Notifications Suite", func() {
 				ctx.CleanupBroker(object["id"].(string))
 			},
 			ExpectedPlatformIDFunc: func(object common.Object) string {
-				return ""
+				objList, err := ctx.SMRepository.List(context.TODO(), types.PlatformType, query.ByField(query.NotEqualsOperator, "id", types.SMPlatform))
+				Expect(err).ToNot(HaveOccurred())
+
+				return objList.ItemAt(0).GetID()
 			},
 			ExpectedAdditionalPayloadFunc: func(expected common.Object, repository storage.Repository) string {
 				serviceOfferings, err := catalog.Load(c, expected["id"].(string), ctx.SMRepository)

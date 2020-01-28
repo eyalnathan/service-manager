@@ -14,52 +14,38 @@ func NewBrokerNotificationsInterceptor() *NotificationsInterceptor {
 			broker := obj.(*types.ServiceBroker)
 
 			var err error
-			planIDs := make([]string, 0)
+			plans := make([]*types.ServicePlan, 0)
 			if len(broker.Services) == 0 {
-				planIDs, err = fetchBrokerPlanIDs(ctx, broker.ID, repository)
+				plans, err = fetchBrokerPlans(ctx, broker.ID, repository)
 				if err != nil {
 					return nil, err
 				}
 			} else {
 				for _, svc := range broker.Services {
 					for _, plan := range svc.Plans {
-						planIDs = append(planIDs, plan.ID)
+						plans = append(plans, plan)
 					}
 				}
 			}
 
-			if len(planIDs) == 0 {
-				return []string{}, nil
+			supportedPlatforms := getSupportedPlatformsForPlans(plans)
+
+			criteria := []query.Criterion{
+				query.ByField(query.NotEqualsOperator, "type", types.SMPlatform),
 			}
 
-			byPlanIDs := query.ByField(query.InOperator, "service_plan_id", planIDs...)
-			objList, err := repository.List(ctx, types.VisibilityType, byPlanIDs)
+			if len(supportedPlatforms) != 0 {
+				criteria = append(criteria, query.ByField(query.InOperator, "type", supportedPlatforms...))
+			}
+
+			objList, err := repository.List(ctx, types.PlatformType, criteria...)
 			if err != nil {
 				return nil, err
 			}
 
-			hasPublicPlan := false
 			platformIDs := make([]string, 0)
 			for i := 0; i < objList.Len(); i++ {
-				platformID := objList.ItemAt(i).(*types.Visibility).PlatformID
-				if platformID == "" {
-					hasPublicPlan = true
-					break
-				}
-
-				platformIDs = append(platformIDs, platformID)
-			}
-
-			if hasPublicPlan {
-				objList, err := repository.List(ctx, types.PlatformType, query.ByField(query.NotEqualsOperator, "id", types.SMPlatform))
-				if err != nil {
-					return nil, err
-				}
-
-				platformIDs = make([]string, 0)
-				for i := 0; i < objList.Len(); i++ {
-					platformIDs = append(platformIDs, objList.ItemAt(i).(*types.Platform).ID)
-				}
+				platformIDs = append(platformIDs, objList.ItemAt(i).GetID())
 			}
 
 			return platformIDs, nil
@@ -128,6 +114,48 @@ func (*BrokerNotificationsDeleteInterceptorProvider) Provide() storage.DeleteOnT
 	return NewBrokerNotificationsInterceptor()
 }
 
+func fetchBrokerPlans(ctx context.Context, brokerID string, repository storage.Repository) ([]*types.ServicePlan, error) {
+	byBrokerID := query.ByField(query.EqualsOperator, "broker_id", brokerID)
+	objList, err := repository.List(ctx, types.ServiceOfferingType, byBrokerID)
+	if err != nil {
+		return nil, err
+	}
+
+	if objList.Len() == 0 {
+		return nil, nil
+	}
+
+	serviceOfferingIDs := make([]string, 0)
+	for i := 0; i < objList.Len(); i++ {
+		serviceOfferingIDs = append(serviceOfferingIDs, objList.ItemAt(i).GetID())
+	}
+
+	byOfferingIDs := query.ByField(query.InOperator, "service_offering_id", serviceOfferingIDs...)
+	objList, err = repository.List(ctx, types.ServicePlanType, byOfferingIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	return objList.(*types.ServicePlans).ServicePlans, nil
+}
+
+func getSupportedPlatformsForPlans(plans []*types.ServicePlan) []string {
+	platformTypes := make(map[string]bool, 0)
+	for _, plan := range plans {
+		types := plan.SupportedPlatforms()
+		for _, t := range types {
+			platformTypes[t] = true
+		}
+	}
+
+	supportedPlatforms := make([]string, 0)
+	for platform := range platformTypes {
+		supportedPlatforms = append(supportedPlatforms, platform)
+	}
+
+	return supportedPlatforms
+}
+
 func fetchBrokerPlanIDs(ctx context.Context, brokerID string, repository storage.Repository) ([]string, error) {
 	byBrokerID := query.ByField(query.EqualsOperator, "broker_id", brokerID)
 	objList, err := repository.List(ctx, types.ServiceOfferingType, byBrokerID)
@@ -156,4 +184,38 @@ func fetchBrokerPlanIDs(ctx context.Context, brokerID string, repository storage
 	}
 
 	return planIDs, nil
+}
+
+func fetchPlatformIDsFromPlans(ctx context.Context, planIDs []string, repository storage.Repository) ([]string, error) {
+	byPlanIDs := query.ByField(query.InOperator, "service_plan_id", planIDs...)
+	objList, err := repository.List(ctx, types.VisibilityType, byPlanIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	hasPublicPlan := false
+	platformIDs := make([]string, 0)
+	for i := 0; i < objList.Len(); i++ {
+		platformID := objList.ItemAt(i).(*types.Visibility).PlatformID
+		if platformID == "" {
+			hasPublicPlan = true
+			break
+		}
+
+		platformIDs = append(platformIDs, platformID)
+	}
+
+	if hasPublicPlan {
+		objList, err := repository.List(ctx, types.PlatformType, query.ByField(query.NotEqualsOperator, "id", types.SMPlatform))
+		if err != nil {
+			return nil, err
+		}
+
+		platformIDs = make([]string, 0)
+		for i := 0; i < objList.Len(); i++ {
+			platformIDs = append(platformIDs, objList.ItemAt(i).(*types.Platform).ID)
+		}
+	}
+
+	return platformIDs, nil
 }
