@@ -91,8 +91,7 @@ func (ni *NotificationsInterceptor) OnTxUpdate(h storage.InterceptUpdateOnTxFunc
 			return nil, err
 		}
 
-		// TODO: how will this work with visibilities where there's a single platform id?
-		presentPlatformIDs, addedPlatormIDs, removedPlatformIDs := determinePlatformIDs(oldPlatformIDs, updatedPlatformIDs)
+		preexistingPlatformIDs, addedPlatformIDs, removedPlatformIDs := determinePlatformIDs(oldPlatformIDs, updatedPlatformIDs)
 
 		oldObjectLabels := oldObject.GetLabels()
 		updatedObjectLabels := updatedObject.GetLabels()
@@ -102,7 +101,7 @@ func (ni *NotificationsInterceptor) OnTxUpdate(h storage.InterceptUpdateOnTxFunc
 		}
 		oldObject.SetLabels(nil)
 
-		for _, platformID := range addedPlatormIDs {
+		for _, platformID := range addedPlatformIDs {
 			if err := CreateNotification(ctx, repository, types.CREATED, updatedObject.GetType(), platformID, &Payload{
 				New: &ObjectPayload{
 					Resource:   updatedObject,
@@ -124,8 +123,8 @@ func (ni *NotificationsInterceptor) OnTxUpdate(h storage.InterceptUpdateOnTxFunc
 			}
 		}
 
-		// TODO?: modifiedPlalformIDs = append(presentPlatformIDs, addedPlatormIDs...)
-		for _, platformID := range presentPlatformIDs {
+		modifiedPlatformIDs := append(preexistingPlatformIDs, addedPlatformIDs...)
+		for _, platformID := range modifiedPlatformIDs {
 			if err := CreateNotification(ctx, repository, types.MODIFIED, updatedObject.GetType(), platformID, &Payload{
 				New: &ObjectPayload{
 					Resource:   updatedObject,
@@ -141,7 +140,6 @@ func (ni *NotificationsInterceptor) OnTxUpdate(h storage.InterceptUpdateOnTxFunc
 			}
 		}
 
-		// TODO: can we defer this?
 		oldObject.SetLabels(oldObjectLabels)
 		updatedObject.SetLabels(updatedObjectLabels)
 
@@ -240,11 +238,11 @@ func CreateNotification(ctx context.Context, repository storage.Repository, op t
 }
 
 func determinePlatformIDs(oldPlatformIDs, updatedPlatformIDs []string) ([]string, []string, []string) {
-	presentPlatformIDs := slice.StringsIntersection(oldPlatformIDs, updatedPlatformIDs)
-	addedPlatformIDs := findDistinctStrings(updatedPlatformIDs, presentPlatformIDs)
-	removedPlatformIDs := findDistinctStrings(oldPlatformIDs, presentPlatformIDs)
+	preexistingPlatformIDs := slice.StringsIntersection(oldPlatformIDs, updatedPlatformIDs)
+	addedPlatformIDs := findDistinctStrings(updatedPlatformIDs, preexistingPlatformIDs)
+	removedPlatformIDs := findDistinctStrings(oldPlatformIDs, preexistingPlatformIDs)
 
-	return presentPlatformIDs, addedPlatformIDs, removedPlatformIDs
+	return preexistingPlatformIDs, addedPlatformIDs, removedPlatformIDs
 }
 
 func findDistinctStrings(str1, str2 []string) []string {
